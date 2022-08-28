@@ -93,23 +93,6 @@ const stdlib = loadStdlib(process.env);
       }// Admin leaves the contract
     }),
     ctcGame.p.Game({
-      // ...stdlib.hasRandom,
-      // getCards: (numPlayers) => {
-      //   // numbers of players in teams computed against player count
-      //   const spyNum = enemyCount(numPlayers);
-      //   const crewNum = numPlayers - spyNum;
-
-      //   // cards created
-      //   const cardArray = cardArrayf(crewNum,spyNum);
-      //   const shuffledCardArray = shuffle(cardArray);
-
-      //   cards = shuffledCardArray;
-
-      //   return shuffledCardArray;
-      // },
-      // showCardsHash: (Hash) => {
-      //   console.log(`\nThe Card Hash is ${Hash}\n`);
-      // },
       showWinningRole: () => {
         const WinRole = Math.floor(Math.random() * 2);
         console.log(`\nThe Winning Role is ${roles[WRole]}\n`);

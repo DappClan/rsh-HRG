@@ -242,78 +242,78 @@ export const main = Reach.App(() => {
     // transfer(totalWager).to(Game);
     const payout = totalWager/winners;
     GP.phase(Phase.PayingWinners());
-    commit();
-    const isAdminWinner = awaitAdminPlayerAPI(receivePay);
+    // commit();
+    // const isAdminWinner = awaitAdminPlayerAPI(receivePay);
 
-    const remainingWager = 
-    parallelReduce(totalWager)
-    .invariant(balance() == remainingWager)
-    .while(remainingWager > 0)
-    .api_(Player.receivePay, () => {
-      check(playersM.member(this), "Participant is not in the game")
-      return [(k) => {
-        if(winnerM.member(this)){
-          k(null)
-          winnerM.remove(this);
-          playersM.remove(this);
-          transfer(payout).to(this)
-          return remainingWager-payout;
-        } else {
-          k(null)
-          playersM.remove(this);
-          return remainingWager;
-        }
-    }]})
+    // const remainingWager = 
+    // parallelReduce(totalWager)
+    // .invariant(balance() == remainingWager)
+    // .while(remainingWager > 0)
+    // .api_(Player.receivePay, () => {
+    //   check(playersM.member(this), "Participant is not in the game")
+    //   return [(k) => {
+    //     if(winnerM.member(this)){
+    //       k(null)
+    //       winnerM.remove(this);
+    //       playersM.remove(this);
+    //       transfer(payout).to(this)
+    //       return remainingWager-payout;
+    //     } else {
+    //       k(null)
+    //       playersM.remove(this);
+    //       return remainingWager;
+    //     }
+    // }]})
 
-    transfer(remainingWager).to(isAdminWinner ? Admin : Game);
+    // transfer(balance()).to(isAdminWinner ? Admin : Game);
 
-    // var [unpaidPlayers,adminPaid] = [numPlayers,false];
-    // invariant(balance() == 0)
-    // while(unpaidPlayers > 0) {
+    var [unpaidPlayers,adminPaid] = [numPlayers,false];
+    invariant(balance() == balance())
+    while(unpaidPlayers > 0) {
 
-    //   commit();
-    //   const isAdminWinner = awaitAdminPlayerAPI(receivePay);
-    //   commit();
-    //   Game.pay(payout);
+      commit();
+      const isAdminWinner = awaitAdminPlayerAPI(receivePay);
+      commit();
+      Game.pay(payout);
       
-    //   if(isAdminWinner && !adminPaid) {
+      if(isAdminWinner && !adminPaid) {
 
-    //     transfer(balance()).to(Admin);
-    //     winnerM.remove(Admin);
-    //     [unpaidPlayers,adminPaid] = [unpaidPlayers -1,true];
-    //     continue;
+        transfer(balance()).to(Admin);
+        winnerM.remove(Admin);
+        [unpaidPlayers,adminPaid] = [unpaidPlayers -1,true];
+        continue;
 
-    //   } else {
+      } else {
 
-    //     const [ winner,unpaidP] = 
-    //     parallelReduce([Game,numPlayers])
-    //     .invariant(balance() == balance())
-    //     .while(winner == Game && unpaidP > 0)
-    //     .api_(Player.receivePay, () => {
-    //       check(playersM.member(this), "Participant is not in the game")
-    //       return [(k) => {
-    //         if(winnerM.member(this)){
-    //           k(null)
-    //           winnerM.remove(this);
-    //           playersM.remove(this);
-    //           transfer(balance()).to(this)
-    //           return[this,unpaidP-1];
-    //         } else {
-    //           k(null)
-    //           playersM.remove(this);
-    //           return[winner,unpaidP-1];
-    //         }
-    //       } ];
-    //     })
+        const [ winner,unpaidP] = 
+        parallelReduce([Game,numPlayers])
+        .invariant(balance() == balance())
+        .while(winner == Game && unpaidP > 0)
+        .api_(Player.receivePay, () => {
+          check(playersM.member(this), "Participant is not in the game")
+          return [(k) => {
+            if(winnerM.member(this)){
+              k(null)
+              winnerM.remove(this);
+              playersM.remove(this);
+              transfer(balance()).to(this)
+              return[this,unpaidP-1];
+            } else {
+              k(null)
+              playersM.remove(this);
+              return[winner,unpaidP-1];
+            }
+          } ];
+        })
 
-    //     transfer(balance()).to(winner);
-    //     [unpaidPlayers,adminPaid] = [unpaidPlayers -1,true];
-    //     continue;
+        transfer(balance()).to(winner);
+        [unpaidPlayers,adminPaid] = [unpaidPlayers -1,true];
+        continue;
 
-    //   }
+      }
 
-    // }
-        
+    }
+    transfer(balance()).to(Game)
     remainingRounds = remainingRounds - 1
     continue;
   }
