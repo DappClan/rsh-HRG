@@ -1,274 +1,229 @@
-'reach 0.1';
+import {loadStdlib} from '@reach-sh/stdlib';
+import * as backend from './build/index.main.mjs';
+const stdlib = loadStdlib(process.env);
 
-const [ isOutcome, PLOSE, PWIN ] = makeEnum(2);
+(async () => {
+  const startingBalance = stdlib.parseCurrency(100);
+  const startingBalanceG = stdlib.parseCurrency(10000);
 
-const outcome = (PRole, WRole) => ((PRole == WRole) ? 1 : 0);
-
-forall(UInt, PRole =>
-  forall(UInt, WRole => 
-    assert(isOutcome(outcome(PRole,WRole)))));
-
-
-const playerFuncs = Struct([["join", UInt],["wager", UInt],["getRole" , UInt],["seeWinner" , UInt]]);
-const PFO = playerFuncs.fromObject({join: 1, wager: 2,getRole: 3, seeWinner: 4});
-
-assert(Struct.toObject(PFO).join     == 1  ||
-      Struct.toObject(PFO).wager     == 2  ||
-      Struct.toObject(PFO).getRole   == 3  ||
-      Struct.toObject(PFO).seeWinner == 4   );
-
-//The function reps
-const join = Struct.toObject(PFO).join;
-const wager = Struct.toObject(PFO).wager;
-const getRole = Struct.toObject(PFO).getRole;
-const seeWinner = Struct.toObject(PFO).seeWinner;
-
-
-const gameParams = Object({ numPlayers: UInt, amt: UInt, rounds: UInt});
-
-
-export const main = Reach.App(() => {
-  setOptions({ untrustworthyMaps: true });
-  const Admin = Participant('Admin', {
-    setParams: gameParams,
-    ready: Fun([], Null)
-  });
-
-  const Game = Participant('Game', {
-    ...hasRandom,
-    getCards: Fun([UInt], UInt),
-    showCardsHash: Fun([Digest], Null),
-    showWinningRole: Fun([UInt], Null),
-  });
-
-  const Player = API('Player', {
-    join: Fun([], Null),
-    wager: Fun([], Null),
-    getRole: Fun([Object({ role: UInt })], Null),
-    seeWinner: Fun([UInt], Bool),
-    receivePay: Fun([], Null) 
-  });
-
-  const Phase = Data({Joining: Null, Wagering: Null, PickingRoles: Null, CheckingWin: Null, PayingWinners: Null, Finished: Null})
-  const GP = Events('GamePhase', { phase: [ Phase ]});
-  init();
+  console.log('Hidden Role Game[spy]')
+  console.log('Version: 1.0');
+  console.log(`\nCreating Admin and Game Accounts`)
+  const accAdmin = await stdlib.newTestAccount(startingBalance);
+  const accGame = await stdlib.newTestAccount(startingBalanceG);
   
-  Admin.only(() => {
-    const { numPlayers, amt, rounds } = declassify(interact.setParams);
-  });
+  const ctcAdmin = accAdmin.contract(backend);
+  const ctcGame = accGame.contract(backend, ctcAdmin.getInfo());
 
-  Admin.publish( numPlayers, amt, rounds);
-  commit();
-  Admin.publish();
-  Admin.interact.ready();
-
-  commit();
-  Game.only(() => {
-    const _cards = interact.getCards(numPlayers);
-    const [ _commitG, _saltG ] = makeCommitment(interact,_cards);
-    const commitG = declassify(_commitG);
-  });
-
-  Game.publish(commitG);
-  Game.interact.showCardsHash(commitG);
-
-
-  var remainingRounds = rounds;
-  invariant(balance() == 0) 
-  while(remainingRounds > 0){
-
-    // Maps and sets of in game concepts
-    const playersM = new Set();
-    const playerCardM = new Map(Address, Object({role: UInt}));
-    const winnerM = new Set();
-
-
-    const awaitAdminPlayerAPI = (apiFunc) => {
-      
-      if  (apiFunc == 1) {
-
-        const [ [], k ] = 
-        call(Player.join)
-        .assume(() => check(this == Admin && !playersM.member(this)))
-        check(this == Admin && !playersM.member(this));
-        k(null);
-        playersM.insert(this);
-        
-      } else if (apiFunc == 2) {
-
-        const [[], k] = 
-        call(Player.wager)
-        .pay(()=> amt)
-        .assume(() => check(this == Admin && playersM.member(this)));
-        check(this == Admin && playersM.member(this));
-        k(null);
-        return amt;
-
-      } else if (apiFunc == 3) {
-
-        const [ [card], k ] = 
-        call(Player.getRole)
-        .assume((card) => check(this == Admin && playersM.member(this)));
-        check(this == Admin && playersM.member(this));
-        k(null);
-        playerCardM[this] = card;
-        
-      } else  {// Change winning logic
-
-        const [ [WRole], k ] = 
-        call(Player.seeWinner)
-        .assume((WRole) => check(this == Admin && playersM.member(this)));
-        check(this == Admin && playersM.member(this));
-        const adminCard = fromSome(playerCardM[this], {role: 0});
-        const adminRole = adminCard.role;
-        const result = outcome(adminRole, WRole)
-        assert(result == PWIN || result == PLOSE);
-        if(result == PWIN) {
-
-          k(true);
-          delete playerCardM[this];
-          winnerM.insert(this)
-          return 1;
-
-        } else {
-
-          k(false);
-          delete playerCardM[this];
-          return 0;
-          
-        }
-      }  
-    }
-    
-    GP.phase(Phase.Joining());
-    commit();
-    awaitAdminPlayerAPI(join);
-    
-    const [playersJoined] =
-    parallelReduce([ 0 ])
-    .invariant(balance() == 0)
-    .invariant(playersJoined <= numPlayers)
-    .while(playersJoined < numPlayers )
-    .api_(Player.join, () => {
-      check(!playersM.member(this));
-      return [ (k) => {
-        k(null);
-        playersM.insert(this);
-        return [playersJoined + 1];
-      }]
-    })
-    .timeout(false);
-
-    GP.phase(Phase.Wagering());
-    commit();
-    const adminWager = awaitAdminPlayerAPI(wager);
-
-    const [totalWager, wageringPlayers] = 
-    parallelReduce([ adminWager, playersJoined ])
-      .invariant(balance() == totalWager)
-      .invariant(wageringPlayers <= playersJoined)
-      .while(wageringPlayers > 0)
-      .api_(Player.wager, () => {
-        check(playersM.member(this))
-        return [amt,  (k) => {
-          k(null);
-          return [totalWager + amt, wageringPlayers - 1];
-        }]
-      })
-      .timeout(false)
-    
-    GP.phase(Phase.PickingRoles());
-    commit();
-    awaitAdminPlayerAPI(getRole);
-
-    const [pickedCards] = 
-    parallelReduce([ 0 ])
-    .invariant(balance() == totalWager)
-    .invariant(pickedCards <= playersJoined)
-    .while(pickedCards < playersJoined)
-    .api_(Player.getRole, (card) => {
-      check(playersM.member(this))
-      return[(k) => {
-        k(null);
-        playerCardM[this] = card;
-        return [pickedCards + 1];
-      }]
-    })
-
-    commit();
-    Game.only(() => {
-      const saltG = declassify(_saltG);
-      const Cards = declassify(_cards);
-    });
-    Game.publish(saltG, Cards);
-    checkCommitment(commitG, saltG, Cards);
-
-    commit();
-    Game.only(() => {
-      const winningRole = declassify(interact.showWinningRole(Cards));
-    })
-    Game.publish(winningRole);
-
-    GP.phase(Phase.CheckingWin());
-    commit();
-    const numWinners = awaitAdminPlayerAPI(seeWinner);
-
-    const [winners, remainingP ] = 
-    parallelReduce([ numWinners, pickedCards])
-    .invariant(balance() == totalWager)
-    .invariant(remainingP <= pickedCards)
-    .while(remainingP > 0)
-    .api(Player.seeWinner, 
-      (WRole,k) => {
-        const PCard = fromSome(playerCardM[this], {role: 0});
-        const PRole = PCard.role;
-        const result = outcome(PRole,WRole);
-        assert(result == PWIN || result == PLOSE);
-
-        if(result == PWIN){
-
-          k(true);
-          delete playerCardM[this];
-          return [winners + 1, remainingP -1];
-
-        } else {
-
-          k(false);
-          delete playerCardM[this];
-          return [ winners, remainingP - 1 ];
-
-        }
-    });
-
-    GP.phase(Phase.PayingWinners());
-    commit();
-    Game.publish();
-
-    const[remainingWager,unpaidP]=
-    parallelReduce([totalWager,numPlayers])
-    .invariant(balance() == remainingWager)
-    .invariant(unpaidP <= numPlayers)
-    .while(unpaidP > 0)
-    .api_(Player.receivePay, () => {
-      const amtW = (amt * (numPlayers + 1))/winners
-      check(playersM.member(this));
-      return[(k) => {
-        if(winnerM.member(this)){
-          transfer(amtW).to(this);
-          return[remainingWager-amtW,unpaidP-1];
-        } else {
-          return[remainingWager,unpaidP-1];
-        }
-      }]
-    });
-
-    transfer(remainingWager).to(numWinners == 1 ? Admin : Game);
-
-    remainingRounds = remainingRounds - 1
-    continue;
+  const gameParams = {
+    numPlayers: 10, // This is exclusive of the admin(who will join later as a player too).
+    amt: stdlib.parseCurrency(5),
+    rounds: 3
   }
 
-  GP.phase(Phase.Finished());
-  commit()
-  exit();
-});
+  console.log(`\nCreating Player Accounts`)
+  const accPlayers = await stdlib.newTestAccounts(gameParams.numPlayers, startingBalance);
+  const ctcPlayers = accPlayers.map((P) => P.contract(backend, ctcAdmin.getInfo()));
+
+  const fmt = (amt) => stdlib.formatCurrency(amt, 2)
+  const printBalances = async (numPlayers) => {
+    const printBalance = async (name, acc) => {
+        const balance = await stdlib.balanceOf(acc);
+        console.log(`  [+] ${name} has ${fmt(balance)} ${stdlib.standardUnit}`);
+    }
+
+    await printBalance('Game', accGame);
+    await printBalance('Admin/Player #1', accAdmin);
+    for (let i = 0; i < numPlayers; i++) {
+        await printBalance(`Player #${i+2}`, accPlayers[i]);
+    }
+  }
+
+  console.log(`\nStarting Balances: `);
+  await printBalances(gameParams.numPlayers);
+
+  const numsArr = Array.from({length: gameParams.range}, (_, i) => i + 1);
+
+  const enemyCount = (playerNum) => ((playerNum == 5 || playerNum == 6) ? 2 : (playerNum == 7 || playerNum == 8) ? 3 : 4);
+  const spyCard = {role: 0}
+  const crewCard = {role: 1}
+
+  const cardArrayf = (crewNum,spyNum) => {
+    const crewCardArray = Array(crewNum).fill(crewCard);
+    const spyCardArray = Array(spyNum).fill(spyCard);
+    const cardArray = crewCardArray.concat(spyCardArray);
+    return cardArray;
+  }
+
+  const shuffle = (array) => {
+    let currentIndex = array.length,  randomIndex;
+  
+    while (currentIndex != 0) {
+  
+      randomIndex = Math.floor(Math.random() * currentIndex);
+      currentIndex--;
+  
+      [array[currentIndex], array[randomIndex]] = [
+        array[randomIndex], array[currentIndex]];
+    }
+  
+    return array;
+  }
+
+  const spyNum = enemyCount(gameParams.numPlayers + 1);
+  const crewNum = (gameParams.numPlayers + 1) - spyNum;
+
+  // cards created
+  const cardArray = cardArrayf(crewNum,spyNum);
+  const shuffledCardArray = shuffle(cardArray);
+
+  const cards = shuffledCardArray;
+
+  const roles = ["SPY","CREW"];
+
+  let WRole = 1;
+
+  console.log(`\nStarting backends ...`)
+  await stdlib.withDisconnect(() => Promise.all([
+    ctcAdmin.p.Admin({
+      setParams: gameParams,
+      ready: () => {
+        console.log(`Admin disconnected as Participant`)
+        stdlib.disconnect(null);
+      }// Admin leaves the contract
+    }),
+    ctcGame.p.Game({
+      // ...stdlib.hasRandom,
+      // getCards: (numPlayers) => {
+      //   // numbers of players in teams computed against player count
+      //   const spyNum = enemyCount(numPlayers);
+      //   const crewNum = numPlayers - spyNum;
+
+      //   // cards created
+      //   const cardArray = cardArrayf(crewNum,spyNum);
+      //   const shuffledCardArray = shuffle(cardArray);
+
+      //   cards = shuffledCardArray;
+
+      //   return shuffledCardArray;
+      // },
+      // showCardsHash: (Hash) => {
+      //   console.log(`\nThe Card Hash is ${Hash}\n`);
+      // },
+      showWinningRole: () => {
+        const WinRole = Math.floor(Math.random() * 2);
+        console.log(`\nThe Winning Role is ${roles[WRole]}\n`);
+        WRole = WinRole;
+      }
+    })
+  ]));
+
+  let phase;
+  do{
+
+    const ev = await ctcAdmin.events.GamePhase.phase.next();
+    phase = ev.what[0][0];
+    switch(phase){
+      case 'Joining':
+        await ctcAdmin.apis.Player.join();
+
+        console.log(`Admin joined in as Player #1`);
+    
+        for(const [ i , ctc ] of ctcPlayers.entries()){
+          try{
+            await ctc.apis.Player.join();
+            console.log(`Player #${i+2} joined the Game`)
+          } catch (e) {
+            console.log(e);
+          }
+        }
+        break;
+
+      case 'Wagering': 
+        // const randomWager = stdlib.parseCurrency(Math.floor(Math.random() * (7-1) + 1));
+        
+        await ctcAdmin.apis.Player.wager();
+
+        console.log(`\nAdmin/Player #1 wagered ${fmt(gameParams.amt)} ${stdlib.standardUnit}`)
+        for(const [ i , ctc ] of ctcPlayers.entries()){
+          // const randomWager = stdlib.parseCurrency(Math.floor(Math.random() * (7-1) + 1));
+          try{ 
+            await ctc.apis.Player.wager();
+
+            console.log(`Player #${i+2}  wagered ${fmt(gameParams.amt)} ${stdlib.standardUnit}`);
+          } catch (e) {
+            console.log(e);
+          }
+        }
+        break;
+        
+      case 'PickingRoles':
+        var numsRange = gameParams.numPlayers;
+        const randomIndex = Math.floor(Math.random() * numsRange);
+        const adminRole = cards[randomIndex].role
+        await ctcAdmin.apis.Player.getRole(adminRole);
+
+        cards.splice(randomIndex,1);
+        numsRange = numsRange - 1;
+
+        console.log(`\nAdmin/Player #1 picked a card`);
+
+        for(const [ i , ctc ] of ctcPlayers.entries()){
+          const randomIndex = Math.floor(Math.random() * numsRange);
+          const playerRole = cards[randomIndex].role;
+          try{
+            await ctc.apis.Player.getRole(playerRole);
+
+            cards.splice(randomIndex,1);
+            numsRange = numsRange - 1;
+
+            console.log(`Player #${i+2} picked a card`);
+          } catch (e) {
+            console.log(e);
+          }
+        }
+        break;
+        
+      case 'CheckingWin':
+        const isAdminWinner = await ctcAdmin.apis.Player.seeWinner(WRole);
+        if(isAdminWinner) {
+          console.log(`\nAdmin/Player #1 won the game!`);
+        } else {
+          console.log(`Better luck next time Player #1`)
+        }
+        for(const [ i, ctc ] of ctcPlayers.entries()){
+          try{
+            const isPlayerWinner = await ctc.apis.Player.seeWinner(WRole);
+            if(isPlayerWinner){
+              console.log(`Player #${i+2} won the game`);
+            } else {
+              console.log(`Better luck next time Player #${i+2}`);
+            }
+          } catch (e) {
+            console.log(e);
+          }
+        }
+        break;
+
+      case 'PayingWinners':
+        await ctcAdmin.apis.Player.receivePay();
+        for(const [i,ctc] of ctcPlayers.entries()){
+          try{
+            await ctc.apis.Player.receivePay();
+          } catch(e) {
+            console.log(e);
+          }
+        }
+        break;
+
+      case 'Finished':
+        console.log('\nFinishing balances: ')
+        printBalances(gameParams.numPlayers);
+
+        break;
+
+    }
+  } while (phase != 'Finished')
+  
+})();
+
