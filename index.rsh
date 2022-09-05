@@ -157,8 +157,8 @@ export const main = Reach.App(() => {
     const [playersJoined] =
     parallelReduce([ 0 ])
     .invariant(balance() == 0)
-    .invariant(playersJoined <= numPlayers)
-    .while(playersJoined < numPlayers )
+    .invariant(playersJoined <= numPlayers -1)
+    .while(playersJoined < numPlayers -1)
     .api_(Player.join, () => {
       check(!playersM.member(this));
       return [ (k) => {
@@ -205,9 +205,9 @@ export const main = Reach.App(() => {
       }]
     })
 
-    Game.only(() => {
-      interact.showWinningRole()
-    })
+    commit();
+    Game.interact.showWinningRole();
+    Game.publish();
 
     GP.phase(Phase.CheckingWin());
     commit();
@@ -286,11 +286,10 @@ export const main = Reach.App(() => {
       }
     }
     transfer(balance()).to(Game);
-    GP.phase(Phase.Finished());
     remainingRounds = remainingRounds - 1;
     continue;
   }
-
+  GP.phase(Phase.Finished());
   commit()
   exit();
 });

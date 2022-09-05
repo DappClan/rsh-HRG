@@ -6,8 +6,7 @@ const stdlib = loadStdlib(process.env);
   const startingBalance = stdlib.parseCurrency(100);
   const startingBalanceG = stdlib.parseCurrency(10000);
 
-  console.log('Hidden Role Game[spy]');
-  console.log('Version: 1.0');
+  console.log('\n\nHidden Role Game[spyfall]');
   console.log(`\nCreating Admin and Game Accounts`);
   const accAdmin = await stdlib.newTestAccount(startingBalance);
   const accGame = await stdlib.newTestAccount(startingBalanceG);
@@ -16,13 +15,13 @@ const stdlib = loadStdlib(process.env);
   const ctcGame = accGame.contract(backend, ctcAdmin.getInfo());
 
   const gameParams = {
-    numPlayers: 10, // This is exclusive of the admin(who will join later as a player too).
+    numPlayers: 10,
     amt: stdlib.parseCurrency(5),
-    rounds: 1
+    rounds: 3
   };
 
   console.log(`\nCreating Player Accounts`);
-  const accPlayers = await stdlib.newTestAccounts(gameParams.numPlayers, startingBalance);
+  const accPlayers = await stdlib.newTestAccounts(gameParams.numPlayers-1, startingBalance);
   const ctcPlayers = accPlayers.map((P) => P.contract(backend, ctcAdmin.getInfo()));
 
   const fmt = (amt) => stdlib.formatCurrency(amt, 2);
@@ -40,9 +39,7 @@ const stdlib = loadStdlib(process.env);
   };
 
   console.log(`\nStarting Balances: `);
-  await printBalances(gameParams.numPlayers);
-
-  const numsArr = Array.from({ length: gameParams.range }, (_, i) => i + 1);
+  await printBalances(gameParams.numPlayers-1);
 
   const enemyCount = (playerNum) => ((playerNum == 5 || playerNum == 6) ? 2 : (playerNum == 7 || playerNum == 8) ? 3 : 4);
   const spyCard = { role: 0 };
@@ -70,16 +67,13 @@ const stdlib = loadStdlib(process.env);
     return array;
   };
 
-  const spyNum = enemyCount(gameParams.numPlayers + 1);
-  const crewNum = (gameParams.numPlayers + 1) - spyNum;
+  const spyNum = enemyCount(gameParams.numPlayers);
+  const crewNum = (gameParams.numPlayers) - spyNum;
 
-  // cards created
-  const cardArray = cardArrayf(crewNum, spyNum);
-  const shuffledCardArray = shuffle(cardArray);
 
   const roles = ["SPY", "CREW"];
 
-  let WRole = 1;
+  let WRole;
 
   const winners = [];
   const pay = async () => {
@@ -91,6 +85,10 @@ const stdlib = loadStdlib(process.env);
           console.log(e)
       }
       winners.pop();
+    } 
+    if (winners.length == 0) {
+      console.log('\nRound balances: ');
+      printBalances(gameParams.numPlayers-1);
     }
   }
 
@@ -106,7 +104,7 @@ const stdlib = loadStdlib(process.env);
     ctcGame.p.Game({
       showWinningRole: () => {
         const WinRole = Math.floor(Math.random() * 2);
-        console.log(`\nThe Winning Role is ${roles[WRole]}\n`);
+        console.log(`\nThe Winning Role is ${roles[WinRole]}`);
         WRole = WinRole;
       },
       payApiWinners: async () => {
@@ -117,6 +115,8 @@ const stdlib = loadStdlib(process.env);
 
   let phase;
   do {
+    
+    // cards created
     const cardArray = cardArrayf(crewNum, spyNum);
     const shuffledCardArray = shuffle(cardArray);
 
@@ -126,7 +126,7 @@ const stdlib = loadStdlib(process.env);
     switch (phase) {
       case 'Joining':
         await ctcAdmin.apis.Player.join();
-        console.log(`Admin joined in as Player #1`);
+        console.log(`\nAdmin joined in as Player #1`);
         for (const [i, ctc] of ctcPlayers.entries()) {
           try {
             await ctc.apis.Player.join();
@@ -156,7 +156,7 @@ const stdlib = loadStdlib(process.env);
         break;
 
       case 'PickingRoles':
-        var numsRange = gameParams.numPlayers;
+        var numsRange = gameParams.numPlayers-1;
         const randomIndex = Math.floor(Math.random() * numsRange);
         const adminRole = cards[randomIndex].role;
         await ctcAdmin.apis.Player.getRole(adminRole);
@@ -207,15 +207,14 @@ const stdlib = loadStdlib(process.env);
       case 'PayingWinners':
         console.log(`\nPaying Winners`);
         await ctcAdmin.apis.Player.receivePay();
-
         break;
 
       case 'Finished':
         console.log('\nFinishing balances: ');
-        printBalances(gameParams.numPlayers);
+        printBalances(gameParams.numPlayers-1);
         break;
 
     }
   } while (phase != 'Finished');
 
-})()
+})(3)
